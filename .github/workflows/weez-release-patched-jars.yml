@@ -1,0 +1,83 @@
+name: "Weez: release patched Debezium jars"
+
+# Builds the Weezevent-patched Debezium jars (debezium-connector-common and
+# debezium-connector-postgres) from this branch and publishes them as a GitHub
+# Release. The kafka-connect image (argocd-applications) downloads these two
+# jars and overwrites the stock jars that ship inside the official
+# debezium-connector-postgres plugin tarball.
+#
+# Only these two modules differ from upstream v3.7.0.Final:
+#   - debezium-connector-common : carries the schema template canonicalization
+#     (TemplateSchemaMappingStorage, the schema.template.canonicalization.*
+#     options, and the buildAndRegisterSchema skipIfPresent change)
+#   - debezium-connector-postgres : PostgresSchema.refreshSchemas uses the
+#     skipIfPresent build path
+#
+# All other runtime jars keep coming from the official upstream plugin tarball,
+# so we only ship what we actually changed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish (e.g. 3.7.0.Final-weez.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: "Build & release patched jars"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build patched modules
+        run: |
+          set -euo pipefail
+          ./mvnw -B -ntp clean install \
+            -pl debezium-connector-common,debezium-connector-postgres -am -Dquick
+
+      - name: Collect patched jars
+        id: collect
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          common_jar="$(ls debezium-connector-common/target/debezium-connector-common-*.Final.jar | grep -vE 'sources|javadoc|tests|original' | head -1)"
+          pg_jar="$(ls debezium-connector-postgres/target/debezium-connector-postgres-*.Final.jar | grep -vE 'sources|javadoc|tests|original' | head -1)"
+          test -f "$common_jar"
+          test -f "$pg_jar"
+          cp "$common_jar" "$pg_jar" dist/
+          echo "Collected:"
+          ls -l dist/
+          ( cd dist && sha256sum *.jar > SHA256SUMS.txt )
+          cat dist/SHA256SUMS.txt
+
+      - name: Create / update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ inputs.release_tag }}'
+          notes="Weezevent-patched Debezium jars built from \`${GITHUB_REF_NAME}\` (upstream base v3.7.0.Final).
+
+          Replaces the stock \`debezium-connector-common\` and \`debezium-connector-postgres\` jars inside the official plugin tarball.
+
+          See WEEZEVENT_FORK.md for the branch model and how the kafka-connect image consumes these assets."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/*.jar dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "$tag" dist/*.jar dist/SHA256SUMS.txt \
+              --title "$tag" \
+              --target "$GITHUB_SHA" \
+              --notes "$notes"
+          fi
