@@ -19,13 +19,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Checks that all commits contain sign-offs
-  check-signed-commits:
-    name: Check signed commits
-    runs-on: ubuntu-latest
-    steps:
-      - uses: debezium/dbz/.github/actions/check-dco@main
-
   # Checks that the PR does not add or modify hidden files or directories outside the allow list
   check-hidden-files:
     name: "Check for hidden files"
@@ -56,7 +49,7 @@ jobs:
   # that subsequent jobs can use to determine whether a particular job should be skipped or included.
   file_changes:
     name: "Detect repository changes"
-    needs: [ check-signed-commits, check-hidden-files, check-unicode-safety ]
+    needs: [ check-hidden-files, check-unicode-safety ]
     runs-on: ubuntu-latest
     outputs:
       ai-changed: ${{ steps.changed-files-ai.outputs.any_changed }}
