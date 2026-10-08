@@ -150,10 +150,30 @@ public abstract class RelationalDatabaseSchema implements DatabaseSchema<TableId
     }
 
     /**
-     * Builds up the CDC event schema for the given table and stores it in this schema.
+     * Builds up the CDC event schema for the given table and stores it in this schema, always overwriting any
+     * previously stored schema. This is used by schema evolution paths (DDL changes), which must replace a stale
+     * schema with the updated one.
      */
     protected void buildAndRegisterSchema(Table table) {
+        buildAndRegisterSchema(table, false);
+    }
+
+    /**
+     * Builds up the CDC event schema for the given table and stores it in this schema.
+     *
+     * @param table the table whose schema should be built and registered
+     * @param skipIfPresent when {@code true}, construction is skipped if the schema storage already holds an entry for
+     *            this table's identifier. With the default storage every table has a distinct identifier, so this has no
+     *            effect; with a canonicalizing storage such as {@link TemplateSchemaMappingStorage} several DDL-identical
+     *            tenant tables resolve to the same stored identifier, so the model is built only once during the initial
+     *            bulk refresh and reused for the rest. Must only be used for the initial build, never for schema
+     *            evolution, which has to overwrite the stored schema.
+     */
+    protected void buildAndRegisterSchema(Table table, boolean skipIfPresent) {
         if (tableFilter.isIncluded(table.id())) {
+            if (skipIfPresent && schemasByTableId.get(table.id()) != null) {
+                return;
+            }
             TableSchema schema = schemaBuilder.create(topicNamingStrategy, table, columnFilter, columnMappers, customKeysMapper);
             schemasByTableId.put(table.id(), schema);
             DebeziumOpenLineageEmitter.emit(

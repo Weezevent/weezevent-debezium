@@ -566,13 +566,38 @@ public abstract class RelationalDatabaseConnectorConfig extends CommonConnectorC
                     + "The class must implement io.debezium.relational.TableMappingStorage<io.debezium.relational.Table>. "
                     + "Defaults to io.debezium.relational.ConcurrentMapTableMappingStorage for in-memory storage.");
 
+    public static final Field SCHEMA_TEMPLATE_CANONICALIZATION_PATTERN = Field.create("schema.template.canonicalization.pattern")
+            .withDisplayName("Schema template canonicalization pattern")
+            .withType(Type.STRING)
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTOR_ADVANCED, 114))
+            .withWidth(Width.LONG)
+            .withImportance(Importance.LOW)
+            .withValidation(Field::isOptional)
+            .withDescription("A regular expression matching the schema names whose relational model is identical and can "
+                    + "share a single built schema. When set together with 'schema.template.canonicalization.target', every "
+                    + "table identifier whose schema part matches this pattern is rewritten to the target schema when stored "
+                    + "and looked up, so the schema model is built only once per logical table. Intended for multi-tenant "
+                    + "databases that use one DDL-identical schema per tenant. Only honored by storage implementations that "
+                    + "support canonicalization, such as io.debezium.relational.TemplateSchemaMappingStorage.");
+
+    public static final Field SCHEMA_TEMPLATE_CANONICALIZATION_TARGET = Field.create("schema.template.canonicalization.target")
+            .withDisplayName("Schema template canonicalization target")
+            .withType(Type.STRING)
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTOR_ADVANCED, 115))
+            .withWidth(Width.MEDIUM)
+            .withImportance(Importance.LOW)
+            .withValidation(Field::isOptional)
+            .withDescription("The canonical schema name that every schema matching 'schema.template.canonicalization.pattern' "
+                    + "is rewritten to. Must be provided together with the pattern for canonicalization to take effect.");
+
     protected static final ConfigDefinition CONFIG_DEFINITION = CommonConnectorConfig.CONFIG_DEFINITION.edit()
             .group(Field.Group.CONNECTION, HOSTNAME, PORT, USER, PASSWORD, DATABASE_NAME, QUERY_TIMEOUT_MS)
             .group(Field.Group.FILTERS, TABLE_INCLUDE_LIST, TABLE_EXCLUDE_LIST, TABLE_IGNORE_BUILTIN, COLUMN_EXCLUDE_LIST, COLUMN_INCLUDE_LIST, SCHEMA_INCLUDE_LIST,
                     SCHEMA_EXCLUDE_LIST, DATABASE_INCLUDE_LIST, DATABASE_EXCLUDE_LIST)
             .group(Field.Group.CONNECTOR, DECIMAL_HANDLING_MODE, TIME_PRECISION_MODE, INCLUDE_SCHEMA_CHANGES, INCLUDE_SCHEMA_COMMENTS)
             .group(Field.Group.CONNECTOR_ADVANCED, MSG_KEY_COLUMNS, MASK_COLUMN_WITH_HASH, MASK_COLUMN, TRUNCATE_COLUMN, PROPAGATE_COLUMN_SOURCE_TYPE,
-                    PROPAGATE_DATATYPE_SOURCE_TYPE, SCHEMA_STORAGE_CLASS, TABLE_STORAGE_CLASS)
+                    PROPAGATE_DATATYPE_SOURCE_TYPE, SCHEMA_STORAGE_CLASS, TABLE_STORAGE_CLASS, SCHEMA_TEMPLATE_CANONICALIZATION_PATTERN,
+                    SCHEMA_TEMPLATE_CANONICALIZATION_TARGET)
             .group(Field.Group.CONNECTOR_SNAPSHOT, SNAPSHOT_LOCK_TIMEOUT_MS, SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE, SNAPSHOT_FULL_COLUMN_SCAN_FORCE,
                     SNAPSHOT_TABLES_ORDER_BY_ROW_COUNT)
             .group(Field.Group.ADVANCED_HEARTBEAT, DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY)
@@ -825,5 +850,25 @@ public abstract class RelationalDatabaseConnectorConfig extends CommonConnectorC
         TableMappingStorage<Table> storage = getConfig().getInstance(TABLE_STORAGE_CLASS, TableMappingStorage.class);
         storage.configure(this, tableIdCaseInsensitive, TableMappingStorage.Type.TABLES);
         return storage;
+    }
+
+    /**
+     * Returns the regular expression that selects the schema names whose relational model is identical and can
+     * share a single built schema, or {@code null} if schema template canonicalization is not configured.
+     *
+     * @return the canonicalization pattern, or {@code null} if not set
+     */
+    public String getSchemaTemplateCanonicalizationPattern() {
+        return getConfig().getString(SCHEMA_TEMPLATE_CANONICALIZATION_PATTERN);
+    }
+
+    /**
+     * Returns the canonical schema name that matching schemas are rewritten to, or {@code null} if schema template
+     * canonicalization is not configured.
+     *
+     * @return the canonicalization target schema, or {@code null} if not set
+     */
+    public String getSchemaTemplateCanonicalizationTarget() {
+        return getConfig().getString(SCHEMA_TEMPLATE_CANONICALIZATION_TARGET);
     }
 }
