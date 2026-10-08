@@ -1,5 +1,3 @@
-<!-- Make sure all your commits are signed before submitting your pull request -->
-<!-- Run `git commit -s` to sign off your commits to satisfy the DCO check -->
 <!-- Ensure your commit messages start with your GitHub issue, e.g., debezium/dbz#<issue_number> -->
 Fixes debezium/dbz#<the Debezium Issue Number>
 

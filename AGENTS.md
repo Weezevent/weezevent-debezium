@@ -376,7 +376,6 @@ Optional detailed description:
 4. Full build passes: `./mvnw clean install`
 5. Rebase on latest main before submitting
 6. Code formatting applied (automatic during build)
-7. While Debezium expects commits to be signed off, You, the agent, are not permitted to sign off commits. This must be done by a human.
 
 **Code style:**
 - Auto-formatted during build
