@@ -4821,6 +4821,25 @@ The property adds following headers:
 `__debezium.context.connectorLogicalName`:: The logical name of the {prodname} connector.
 `__debezium.context.taskId`:: The unique identifier of the connector task.
 `__debezium.context.connectorName`::  The name of the {prodname} connector.
+
+|[[postgresql-property-schema-template-canonicalization-pattern]]<<postgresql-property-schema-template-canonicalization-pattern, `+schema.template.canonicalization.pattern+`>>
+|No default
+|An optional regular expression that matches the names of schemas whose relational model is identical, so that they can share a single built schema.
+Intended for multi-tenant databases that use one DDL-identical schema per tenant, where building a separate schema model for every tenant schema is prohibitively expensive.
+
+When you set this property together with `schema.template.canonicalization.target`, the connector rewrites the schema part of every table identifier that matches the pattern to the target schema when it stores and looks up schemas.
+As a result, the connector builds the schema model only once per logical table, rather than once per tenant schema.
+
+[NOTE]
+====
+This property is honored only by schema storage implementations that support canonicalization, such as `io.debezium.relational.TemplateSchemaMappingStorage`.
+To enable the behavior, set `memory.management.schemas.class` to that class.
+====
+
+|[[postgresql-property-schema-template-canonicalization-target]]<<postgresql-property-schema-template-canonicalization-target, `+schema.template.canonicalization.target+`>>
+|No default
+|The canonical schema name that the connector rewrites every schema matching `schema.template.canonicalization.pattern` to.
+You must set this property together with `schema.template.canonicalization.pattern`; setting only one of the two properties results in an error.
 |===
 
 [id="debezium-postgresql-connector-pass-through-properties"]

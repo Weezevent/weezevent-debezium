@@ -184,7 +184,9 @@ public class PostgresSchema extends RelationalDatabaseSchema {
         clearSchemas();
 
         // Create TableSchema instances for any existing table ...
-        tableIds().forEach(this::refreshSchema);
+        // skipIfPresent=true lets a canonicalizing schema storage (schema template canonicalization) build the model
+        // only once per logical table instead of once per DDL-identical tenant schema during this bulk refresh.
+        tableIds().forEach(id -> buildAndRegisterSchema(tableFor(id), true));
     }
 
     private void refreshToastableColumnsMap(PostgresConnection connection, TableId tableId) {
