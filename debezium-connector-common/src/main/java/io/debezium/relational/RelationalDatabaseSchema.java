@@ -8,7 +8,9 @@ package io.debezium.relational;
 import static io.debezium.openlineage.dataset.DatasetMetadata.DatasetKind.INPUT;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.kafka.connect.data.Schema;
 import org.slf4j.Logger;
@@ -25,6 +27,7 @@ import io.debezium.relational.Tables.TableFilter;
 import io.debezium.relational.mapping.ColumnMappers;
 import io.debezium.schema.DatabaseSchema;
 import io.debezium.spi.topic.TopicNamingStrategy;
+import io.debezium.util.Strings;
 
 /**
  * A {@link DatabaseSchema} of a relational database such as Postgres. Provides information about the physical structure
@@ -47,6 +50,11 @@ public abstract class RelationalDatabaseSchema implements DatabaseSchema<TableId
     private final SchemasByTableId schemasByTableId;
     private final Tables tables;
 
+    // Multi-tenant schema template (null when not configured) and the event schemas shared by structurally
+    // identical tenant tables, keyed by SchemaTemplate#sharingKey.
+    private final SchemaTemplate schemaSharingTemplate;
+    private final Map<String, TableSchema> sharedTenantSchemas = new ConcurrentHashMap<>();
+
     protected RelationalDatabaseSchema(RelationalDatabaseConnectorConfig config, TopicNamingStrategy<TableId> topicNamingStrategy,
                                        TableFilter tableFilter, ColumnNameFilter columnFilter, TableSchemaBuilder schemaBuilder,
                                        boolean tableIdCaseInsensitive, KeyMapper customKeysMapper, CdcSourceTaskContext<? extends CommonConnectorConfig> taskContext) {
@@ -62,6 +70,27 @@ public abstract class RelationalDatabaseSchema implements DatabaseSchema<TableId
         this.schemasByTableId = new SchemasByTableId(config.createSchemaStorage(tableIdCaseInsensitive));
         this.tables = new Tables(tableIdCaseInsensitive, config);
         this.taskContext = taskContext;
+        this.schemaSharingTemplate = resolveSchemaSharingTemplate(config, topicNamingStrategy);
+    }
+
+    private static SchemaTemplate resolveSchemaSharingTemplate(RelationalDatabaseConnectorConfig config, TopicNamingStrategy<TableId> topicNamingStrategy) {
+        final SchemaTemplate template = SchemaTemplate.from(config);
+        if (template == null) {
+            return null;
+        }
+        // Custom converters and key augmentation are resolved per table identifier inside the schema builder, so a
+        // shared schema could carry another tenant's choice. Keep one schema per table in that case.
+        final boolean customConverters = !Strings.isNullOrBlank(config.getConfig().getString(CommonConnectorConfig.CUSTOM_CONVERTERS));
+        final boolean keyAugmented = topicNamingStrategy.keySchemaAugment() != TopicNamingStrategy.NO_SCHEMA_OP
+                || topicNamingStrategy.keyValueAugment() != TopicNamingStrategy.NO_VALUE_OP;
+        if (customConverters || keyAugmented) {
+            LOG.warn("Schema template '{}' is configured but tenant event schemas will not be shared because {} is in use",
+                    template.templateSchema(), customConverters ? "'converters'" : "key augmentation by the topic naming strategy");
+            return null;
+        }
+        LOG.info("Schema template enabled: tenant tables with the same structure as in schema '{}' share one event schema",
+                template.templateSchema());
+        return template;
     }
 
     @Override
@@ -147,40 +176,37 @@ public abstract class RelationalDatabaseSchema implements DatabaseSchema<TableId
 
     protected void clearSchemas() {
         schemasByTableId.clear();
-    }
-
-    /**
-     * Builds up the CDC event schema for the given table and stores it in this schema, always overwriting any
-     * previously stored schema. This is used by schema evolution paths (DDL changes), which must replace a stale
-     * schema with the updated one.
-     */
-    protected void buildAndRegisterSchema(Table table) {
-        buildAndRegisterSchema(table, false);
+        sharedTenantSchemas.clear();
     }
 
     /**
      * Builds up the CDC event schema for the given table and stores it in this schema.
-     *
-     * @param table the table whose schema should be built and registered
-     * @param skipIfPresent when {@code true}, construction is skipped if the schema storage already holds an entry for
-     *            this table's identifier. With the default storage every table has a distinct identifier, so this has no
-     *            effect; with a canonicalizing storage such as {@link TemplateSchemaMappingStorage} several DDL-identical
-     *            tenant tables resolve to the same stored identifier, so the model is built only once during the initial
-     *            bulk refresh and reused for the rest. Must only be used for the initial build, never for schema
-     *            evolution, which has to overwrite the stored schema.
      */
-    protected void buildAndRegisterSchema(Table table, boolean skipIfPresent) {
+    protected void buildAndRegisterSchema(Table table) {
         if (tableFilter.isIncluded(table.id())) {
-            if (skipIfPresent && schemasByTableId.get(table.id()) != null) {
-                return;
-            }
-            TableSchema schema = schemaBuilder.create(topicNamingStrategy, table, columnFilter, columnMappers, customKeysMapper);
+            TableSchema schema = createSchema(table);
             schemasByTableId.put(table.id(), schema);
             DebeziumOpenLineageEmitter.emit(
                     DebeziumOpenLineageEmitter.connectorContext(taskContext.getRawConfig().asMap(), config.getConnectorName(), taskContext.getRunId()),
                     DebeziumTaskState.RUNNING,
                     List.of(extractDatasetMetadata(table)));
         }
+    }
+
+    /**
+     * Creates the event schema for the given table. Tenant tables of a configured schema template that have the same
+     * structure share one built schema, bound to each table's own identifier via {@link TableSchema#withId(TableId)}.
+     */
+    private TableSchema createSchema(Table table) {
+        if (schemaSharingTemplate != null) {
+            final String key = schemaSharingTemplate.sharingKey(table, columnFilter, columnMappers, customKeysMapper);
+            if (key != null) {
+                return sharedTenantSchemas
+                        .computeIfAbsent(key, k -> schemaBuilder.create(topicNamingStrategy, table, columnFilter, columnMappers, customKeysMapper))
+                        .withId(table.id());
+            }
+        }
+        return schemaBuilder.create(topicNamingStrategy, table, columnFilter, columnMappers, customKeysMapper);
     }
 
     private DatasetMetadata extractDatasetMetadata(Table table) {

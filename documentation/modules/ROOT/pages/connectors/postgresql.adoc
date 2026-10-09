@@ -4824,22 +4824,26 @@ The property adds following headers:
 
 |[[postgresql-property-schema-template-canonicalization-pattern]]<<postgresql-property-schema-template-canonicalization-pattern, `+schema.template.canonicalization.pattern+`>>
 |No default
-|An optional regular expression that matches the names of schemas whose relational model is identical, so that they can share a single built schema.
-Intended for multi-tenant databases that use one DDL-identical schema per tenant, where building a separate schema model for every tenant schema is prohibitively expensive.
+|An optional regular expression that matches the names of tenant schemas in a multi-tenant database that uses one schema per tenant with the same tables.
+You must set it together with `schema.template.canonicalization.target`.
 
-When you set this property together with `schema.template.canonicalization.target`, the connector rewrites the schema part of every table identifier that matches the pattern to the target schema when it stores and looks up schemas.
-As a result, the connector builds the schema model only once per logical table, rather than once per tenant schema.
+When set, the connector reads the initial table structure from the template schema only, instead of introspecting every tenant schema at startup.
+Tables of the other tenant schemas are loaded on demand from the `RELATION` messages that `pgoutput` sends before the first change of a table.
+Tenant tables whose structure is identical (same columns in the same order, types, nullability, defaults, and keys) share one event schema in memory.
+A tenant table that differs in any of these aspects gets its own event schema, so change events are always built from the table's actual structure.
+Change events keep their own table identifier, topic, and `source` information.
 
 [NOTE]
 ====
-This property is honored only by schema storage implementations that support canonicalization, such as `io.debezium.relational.TemplateSchemaMappingStorage`.
-To enable the behavior, set `memory.management.schemas.class` to that class.
+This option requires the `pgoutput` plug-in and is meant for streaming (for example `snapshot.mode=no_data`): an initial snapshot only covers the tables known at startup, that is, the template schema. Use incremental snapshots to backfill tenant tables.
+Event schemas are not shared when `converters` is set or when the topic naming strategy augments the message key; the initial load is still restricted to the template schema.
 ====
 
 |[[postgresql-property-schema-template-canonicalization-target]]<<postgresql-property-schema-template-canonicalization-target, `+schema.template.canonicalization.target+`>>
 |No default
-|The canonical schema name that the connector rewrites every schema matching `schema.template.canonicalization.pattern` to.
-You must set this property together with `schema.template.canonicalization.pattern`; setting only one of the two properties results in an error.
+|The name of the template schema used by `schema.template.canonicalization.pattern`.
+It must match the pattern and contain all captured tables.
+Setting only one of the two properties, or a target that does not match the pattern, results in a configuration error.
 |===
 
 [id="debezium-postgresql-connector-pass-through-properties"]
