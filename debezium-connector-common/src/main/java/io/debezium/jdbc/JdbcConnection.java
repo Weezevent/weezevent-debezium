@@ -1213,6 +1213,22 @@ public class JdbcConnection implements AutoCloseable {
     public void readSchema(Tables tables, String catalogName, String schemaName,
                            TableFilter tableFilter, ColumnNameFilter columnFilter, boolean removeTablesNotFoundInJdbc)
             throws SQLException {
+        readSchema(tables, catalogName, schemaName, tableFilter, columnFilter, removeTablesNotFoundInJdbc, false);
+    }
+
+    /**
+     * Same as {@link #readSchema(Tables, String, String, TableFilter, ColumnNameFilter, boolean)}, optionally forcing a
+     * single column metadata query for the whole {@code schemaName} instead of one query per captured table.
+     * <p>
+     * This is needed because {@code snapshot.scan.all.columns.force} is a connector option, while {@link #config()} only
+     * holds the {@code database.*} / {@code driver.*} subset, so that option can't be observed from here.
+     *
+     * @param forceFullColumnScan {@code true} to always read the columns with a single query
+     */
+    public void readSchema(Tables tables, String catalogName, String schemaName,
+                           TableFilter tableFilter, ColumnNameFilter columnFilter, boolean removeTablesNotFoundInJdbc,
+                           boolean forceFullColumnScan)
+            throws SQLException {
         // Before we make any changes, get the copy of the set of table IDs ...
         Set<TableId> tableIdsBefore = new HashSet<>(tables.tableIds());
 
@@ -1251,7 +1267,7 @@ public class JdbcConnection implements AutoCloseable {
 
         Map<TableId, List<Column>> columnsByTable = new HashMap<>();
 
-        if (totalTables == tableIds.size() || config.getBoolean(RelationalDatabaseConnectorConfig.SNAPSHOT_FULL_COLUMN_SCAN_FORCE)) {
+        if (forceFullColumnScan || totalTables == tableIds.size() || config.getBoolean(RelationalDatabaseConnectorConfig.SNAPSHOT_FULL_COLUMN_SCAN_FORCE)) {
             columnsByTable = getColumnsDetails(catalogName, schemaName, null, tableFilter, columnFilter, metadata, viewIds);
             if (columnsByTable.isEmpty()) {
                 for (TableId emptyTableId : tableIds) {

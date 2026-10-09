@@ -88,6 +88,19 @@ public class TableSchema implements DataCollectionSchema {
     }
 
     /**
+     * Returns a schema with the same key/value schemas and generators, bound to another table identifier.
+     *
+     * @param id the table identifier the returned schema is for; may not be null
+     * @return this instance if the identifier is unchanged, otherwise a copy bound to {@code id}
+     */
+    public TableSchema withId(TableId id) {
+        if (this.id.equals(id)) {
+            return this;
+        }
+        return new TableSchema(id, keySchema, keyGenerator, envelopeSchema, valueSchema, valueGenerator);
+    }
+
+    /**
      * Get the {@link Schema} that represents the table's columns, excluding those that make up the {@link #keySchema()}.
      *
      * @return the Schema describing the columns in the table; never null

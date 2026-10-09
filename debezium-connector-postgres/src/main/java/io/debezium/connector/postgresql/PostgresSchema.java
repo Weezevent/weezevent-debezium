@@ -27,6 +27,7 @@ import io.debezium.connector.postgresql.connection.ReplicaIdentityInfo;
 import io.debezium.jdbc.JdbcConnection;
 import io.debezium.relational.CustomConverterRegistry;
 import io.debezium.relational.RelationalDatabaseSchema;
+import io.debezium.relational.SchemaTemplate;
 import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
 import io.debezium.relational.TableSchemaBuilder;
@@ -87,8 +88,22 @@ public class PostgresSchema extends RelationalDatabaseSchema {
      * @throws SQLException if there is a problem obtaining the schema from the database server
      */
     protected PostgresSchema refresh(PostgresConnection connection, boolean printReplicaIdentityInfo) throws SQLException {
-        // read all the information from the DB
-        connection.readSchema(tables(), null, null, getTableFilter(), null, true);
+        final SchemaTemplate template = SchemaTemplate.from(connectorConfig);
+        if (template != null) {
+            // Multi-tenant: tenant schemas share the template's table definitions, so only the template is introspected.
+            // Tables of the other tenant schemas are added on demand from the pgoutput RELATION messages that precede
+            // their first change in the stream. Tables already known are kept (no removal), as only the template is read.
+            LOGGER.info("Schema template enabled: reading the initial table structure from schema '{}' only", template.templateSchema());
+            connection.readSchema(tables(), null, template.templateSchema(), getTableFilter(), null, false, true);
+            if (tableIds().isEmpty()) {
+                LOGGER.warn("Template schema '{}' contains no captured table; check schema.template.canonicalization.target",
+                        template.templateSchema());
+            }
+        }
+        else {
+            // read all the information from the DB
+            connection.readSchema(tables(), null, null, getTableFilter(), null, true);
+        }
         if (printReplicaIdentityInfo) {
             // print out all the replica identity info
             tableIds().forEach(tableId -> printReplicaIdentityInfo(connection, tableId));
@@ -184,9 +199,7 @@ public class PostgresSchema extends RelationalDatabaseSchema {
         clearSchemas();
 
         // Create TableSchema instances for any existing table ...
-        // skipIfPresent=true lets a canonicalizing schema storage (schema template canonicalization) build the model
-        // only once per logical table instead of once per DDL-identical tenant schema during this bulk refresh.
-        tableIds().forEach(id -> buildAndRegisterSchema(tableFor(id), true));
+        tableIds().forEach(this::refreshSchema);
     }
 
     private void refreshToastableColumnsMap(PostgresConnection connection, TableId tableId) {

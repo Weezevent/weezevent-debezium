@@ -19,10 +19,13 @@ diverged from the `v3.7.0.Final` tag, so we deliberately do not ship it to produ
 
 ## Our patches on top of `v3.7.0.Final`
 
-- **Schema template canonicalization** for multi-tenant databases (gill): one DDL-identical schema
-  per tenant is collapsed to a single built schema so the connector does not build hundreds of
-  thousands of `TableSchema` objects at startup. See `TemplateSchemaMappingStorage` and the
-  `schema.template.canonicalization.*` connector options.
+- **Multi-tenant schema template** (gill), options `schema.template.canonicalization.pattern` /
+  `.target`: the Postgres connector reads the initial table structure from the template schema
+  only (one bulk query) instead of every tenant schema, tenant tables are loaded on demand from
+  pgoutput `RELATION` messages, and structurally identical tenant tables share one event schema
+  (`SchemaTemplate`, `TableSchema#withId`). See the option docs in `postgresql.adoc`.
+- **Field name cache keyed by column name** (`FieldNameSelector`): fixes the CPU thrash of the
+  bounded cache when a connector captures a very large number of tables.
 - Removed the DCO sign-off requirement (CI check and docs).
 
 ## One-time setup for a working clone
@@ -39,6 +42,12 @@ git fetch upstream 3.7
 git branch -f mirror/upstream-3.7 upstream/3.7
 git push origin mirror/upstream-3.7
 ```
+
+## Publishing the patched jars
+
+The release tag is read from `.weez-release`. Bump it in the same PR as the code change: merging into
+`weez-3.7` runs `weez-release-patched-jars.yml`, which builds the jars and creates that release (an
+existing release is never overwritten). The workflow can also be run manually from the Actions tab.
 
 ## Adopting a new upstream 3.7.x release into production
 

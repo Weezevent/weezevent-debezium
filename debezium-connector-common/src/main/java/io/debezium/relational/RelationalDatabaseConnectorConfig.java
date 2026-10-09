@@ -573,12 +573,12 @@ public abstract class RelationalDatabaseConnectorConfig extends CommonConnectorC
             .withWidth(Width.LONG)
             .withImportance(Importance.LOW)
             .withValidation(Field::isOptional)
-            .withDescription("A regular expression matching the schema names whose relational model is identical and can "
-                    + "share a single built schema. When set together with 'schema.template.canonicalization.target', every "
-                    + "table identifier whose schema part matches this pattern is rewritten to the target schema when stored "
-                    + "and looked up, so the schema model is built only once per logical table. Intended for multi-tenant "
-                    + "databases that use one DDL-identical schema per tenant. Only honored by storage implementations that "
-                    + "support canonicalization, such as io.debezium.relational.TemplateSchemaMappingStorage.");
+            .withDescription("A regular expression matching the names of tenant schemas that share the same table definitions "
+                    + "(multi-tenant databases with one schema per tenant). Must be set together with "
+                    + "'schema.template.canonicalization.target'. When set, the connector reads the initial table structure "
+                    + "from the target schema only, instead of introspecting every tenant schema; tables of the other tenant "
+                    + "schemas are loaded on demand from the replication stream. Tenant tables whose structure is identical "
+                    + "share a single event schema in memory, while change events keep their own table identifier.");
 
     public static final Field SCHEMA_TEMPLATE_CANONICALIZATION_TARGET = Field.create("schema.template.canonicalization.target")
             .withDisplayName("Schema template canonicalization target")
@@ -586,9 +586,9 @@ public abstract class RelationalDatabaseConnectorConfig extends CommonConnectorC
             .withGroup(Field.createGroupEntry(Field.Group.CONNECTOR_ADVANCED, 115))
             .withWidth(Width.MEDIUM)
             .withImportance(Importance.LOW)
-            .withValidation(Field::isOptional)
-            .withDescription("The canonical schema name that every schema matching 'schema.template.canonicalization.pattern' "
-                    + "is rewritten to. Must be provided together with the pattern for canonicalization to take effect.");
+            .withValidation(RelationalDatabaseConnectorConfig::validateSchemaTemplate)
+            .withDescription("The name of the template schema used by 'schema.template.canonicalization.pattern'. It must match "
+                    + "the pattern and contain the full set of captured tables. Must be set together with the pattern.");
 
     protected static final ConfigDefinition CONFIG_DEFINITION = CommonConnectorConfig.CONFIG_DEFINITION.edit()
             .group(Field.Group.CONNECTION, HOSTNAME, PORT, USER, PASSWORD, DATABASE_NAME, QUERY_TIMEOUT_MS)
@@ -789,6 +789,32 @@ public abstract class RelationalDatabaseConnectorConfig extends CommonConnectorC
 
     private static int validateDatabaseExcludeList(Configuration config, Field field, ValidationOutput problems) {
         return ConnectorConfigValidationHelper.validateExcludeField(config, DATABASE_INCLUDE_LIST, DATABASE_EXCLUDE_LIST, problems);
+    }
+
+    private static int validateSchemaTemplate(Configuration config, Field field, ValidationOutput problems) {
+        final String pattern = config.getString(SCHEMA_TEMPLATE_CANONICALIZATION_PATTERN);
+        final String target = config.getString(SCHEMA_TEMPLATE_CANONICALIZATION_TARGET);
+        final boolean hasPattern = !Strings.isNullOrBlank(pattern);
+        final boolean hasTarget = !Strings.isNullOrBlank(target);
+        if (hasPattern != hasTarget) {
+            problems.accept(field, target, "'" + SCHEMA_TEMPLATE_CANONICALIZATION_PATTERN.name() + "' and '"
+                    + SCHEMA_TEMPLATE_CANONICALIZATION_TARGET.name() + "' must be provided together");
+            return 1;
+        }
+        if (!hasPattern) {
+            return 0;
+        }
+        try {
+            if (!Pattern.compile(pattern).matcher(target).matches()) {
+                problems.accept(field, target, "The template schema must match '" + SCHEMA_TEMPLATE_CANONICALIZATION_PATTERN.name() + "'");
+                return 1;
+            }
+        }
+        catch (RuntimeException e) {
+            problems.accept(SCHEMA_TEMPLATE_CANONICALIZATION_PATTERN, pattern, "Invalid regular expression: " + e.getMessage());
+            return 1;
+        }
+        return 0;
     }
 
     private static int validateMessageKeyColumnsField(Configuration config, Field field, ValidationOutput problems) {
